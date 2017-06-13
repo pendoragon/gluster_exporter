@@ -1,0 +1,34 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    app: gluster-exporter
+  name: gluster
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: gluster-exporter
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+      creationTimestamp: null
+      labels:
+        app: gluster-exporter
+      name: gluster-exporter
+    spec:
+      containers:
+      - image: cargo.caicloud.io/caicloud/gluster-exporter:test
+        imagePullPolicy: Always
+        name: gluster-exporter
+        ports:
+        - containerPort: 9100
+          hostPort: 9100
+          name: scrape
+          protocol: TCP
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      nodeSelector:
+        glusterfs: true
