@@ -24,11 +24,10 @@ spec:
         name: gluster-exporter
         ports:
         - containerPort: 9100
-          hostPort: 9100
           name: scrape
           protocol: TCP
       dnsPolicy: ClusterFirst
       hostNetwork: true
       restartPolicy: Always
       nodeSelector:
-        glusterfs: true
+        glusterfs: "true"

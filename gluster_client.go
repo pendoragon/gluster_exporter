@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -12,13 +13,24 @@ import (
 	"github.com/prometheus/common/log"
 )
 
+var m runtime.MemStats
+
 func execGlusterCommand(arg ...string) (*bytes.Buffer, error) {
 	stdoutBuffer := &bytes.Buffer{}
 	argXML := append(arg, "--xml")
 	glusterExec := exec.Command(GlusterCmd, argXML...)
 	glusterExec.Stdout = stdoutBuffer
 	err := glusterExec.Run()
-
+	// fmt.Println("-----------------------------------------------------------")
+	// fmt.Printf("executed command: %#v\n", arg)
+	// // if stdoutBuffer.Cap() > max {
+	// // 	max = stdoutBuffer.Cap()
+	// // }
+	// fmt.Printf("buffer size: %#v\n", stdoutBuffer.Cap())
+	// // fmt.Printf("max buffer as of now: %#v\n", max)
+	// runtime.ReadMemStats(&m)
+	// fmt.Printf("%d,%d,%d,%d\n", m.HeapSys, m.HeapAlloc,	m.HeapIdle, m.HeapReleased)
+	// fmt.Println("-----------------------------------------------------------")
 	if err != nil {
 		log.Errorf("tried to execute %v and got error: %v", arg, err)
 		return stdoutBuffer, err
