@@ -1,0 +1,48 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: gluster-exporter
+  name: gluster
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gluster-exporter
+  template:
+    metadata:
+      annotations:
+        prometheus.io/port: "9189"
+        prometheus.io/scrape: "true"
+      labels:
+        app: gluster-exporter
+      name: gluster-exporter
+    spec:
+      containers:
+      - image: cargo.caicloud.io/caicloud/gluster-exporter:v0.2
+        imagePullPolicy: Always
+        name: gluster-exporter
+        volumeMounts:
+        - mountPath: /var/run
+          name: gluster-socket
+        ports:
+        - containerPort: 9189
+          name: scrape
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      volumes:
+      - name: gluster-socket
+        hostPath:
+          path: /var/run
+      nodeSelector:
+        glusterfs: "true"

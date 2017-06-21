@@ -38,16 +38,22 @@ type Volume struct {
 	Status     int      `xml:"status"`
 	StatusStr  string   `xml:"statusStr"`
 	BrickCount int      `xml:"brickCount"`
-	Bricks     []Brick  `xml:"bricks"`
+	Bricks     Bricks   `xml:"bricks"`
 	DistCount  int      `xml:"distCount"`
+}
+
+type Bricks struct {
+	XMLName xml.Name `xml:"bricks"`
+	Brick   []Brick  `xml:"brick"`
 }
 
 // Brick element of "gluster volume info" command
 type Brick struct {
-	UUID      string `xml:"brick>uuid"`
-	Name      string `xml:"brick>name"`
-	HostUUID  string `xml:"brick>hostUuid"`
-	IsArbiter int    `xml:"brick>isArbiter"`
+	XMLName   xml.Name `xml:"brick"`
+	UUID      string   `xml:"uuid,attr"`
+	Name      string   `xml:"name"`
+	HostUUID  string   `xml:"hostUuid"`
+	IsArbiter int      `xml:"isArbiter"`
 }
 
 // VolumeListXML struct repesents cliOutput element of "gluster volume list" command
@@ -277,27 +283,28 @@ func VolumeStatusAllDetailXMLUnmarshall(cmdOutBuff *bytes.Buffer) (VolumeStatusX
 }
 
 type QuotaLimit struct {
-    XMLName          xml.Name `xml:"limit"`
-    Path             string   `xml:"path"`
-    HardLimit        uint64   `xml:"hard_limit"`
-    SoftLimitValue   uint64   `xml:"soft_limit_value"`
-    UsedSpace        uint64   `xml:"used_space"`
-    AvailSpace       uint64   `xml:"avail_space"`
-    SlExceeded       string   `xml:"sl_exceeded"`
-    HlExceeded       string   `xml:"hl_exceeded"`
+	XMLName        xml.Name `xml:"limit"`
+	Path           string   `xml:"path"`
+	HardLimit      uint64   `xml:"hard_limit"`
+	SoftLimitValue uint64   `xml:"soft_limit_value"`
+	UsedSpace      uint64   `xml:"used_space"`
+	AvailSpace     uint64   `xml:"avail_space"`
+	SlExceeded     string   `xml:"sl_exceeded"`
+	HlExceeded     string   `xml:"hl_exceeded"`
 }
 
 type VolQuota struct {
-    XMLName     xml.Name     `xml:"volQuota"`
-    QuotaLimits []QuotaLimit `xml:"limit"`
+	XMLName     xml.Name     `xml:"volQuota"`
+	QuotaLimits []QuotaLimit `xml:"limit"`
 }
+
 // VolumeQuotaXML XML type of "gluster volume quota list"
 type VolumeQuotaXML struct {
-    XMLName  xml.Name  `xml:"cliOutput"`
-    OpRet     int      `xml:"opRet"`
-    OpErrno   int      `xml:"opErrno"`
-    OpErrstr  string   `xml:"opErrstr"`
-    VolQuota  VolQuota `xml:"volQuota"`
+	XMLName  xml.Name `xml:"cliOutput"`
+	OpRet    int      `xml:"opRet"`
+	OpErrno  int      `xml:"opErrno"`
+	OpErrstr string   `xml:"opErrstr"`
+	VolQuota VolQuota `xml:"volQuota"`
 }
 
 func VolumeQuotaListXMLUnmarshall(cmdOutBuff *bytes.Buffer) (VolumeQuotaXML, error) {
