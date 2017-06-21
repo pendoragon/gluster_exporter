@@ -16,12 +16,15 @@ package main
 
 import (
 	"flag"
-	"net/http"
-
 	"fmt"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/ofesseler/gluster_exporter/structs"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
@@ -114,6 +117,12 @@ var (
 		[]string{"volume", "brick", "fop_name"}, nil,
 	)
 
+	brickMapping = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "brick_mapping"),
+		"Mapping between volumes and bricks.",
+		[]string{"volume", "brick_name", "device"}, nil,
+	)
+
 	peersConnected = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "peers_connected"),
 		"Is peer connected to gluster cluster.",
@@ -191,6 +200,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- brickFopLatencyAvg
 	ch <- brickFopLatencyMin
 	ch <- brickFopLatencyMax
+	ch <- brickMapping
 	ch <- healInfoFilesCount
 	ch <- volumeWriteable
 	ch <- mountSuccessful
@@ -230,14 +240,17 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	)
 
 	for _, volume := range volumeInfo.VolInfo.Volumes.Volume {
-		if e.volumes[0] == allVolumes || ContainsVolume(e.volumes, volume.Name) {
+		ch <- prometheus.MustNewConstMetric(
+			brickCount, prometheus.GaugeValue, float64(volume.BrickCount), volume.Name,
+		)
 
+		ch <- prometheus.MustNewConstMetric(
+			volumeStatus, prometheus.GaugeValue, float64(volume.Status), volume.Name,
+		)
+		for _, brick := range volume.Bricks.Brick {
+			device := getBrickDevicePath(brick.Name)
 			ch <- prometheus.MustNewConstMetric(
-				brickCount, prometheus.GaugeValue, float64(volume.BrickCount), volume.Name,
-			)
-
-			ch <- prometheus.MustNewConstMetric(
-				volumeStatus, prometheus.GaugeValue, float64(volume.Status), volume.Name,
+				brickMapping, prometheus.GaugeValue, 1, volume.Name, brick.Name, device,
 			)
 		}
 	}
@@ -264,114 +277,123 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 					log.Errorf("Error while executing or marshalling gluster profile output: %v", execVolProfileErr)
 				}
 				for _, brick := range volumeProfile.Brick {
-					if strings.HasPrefix(brick.BrickName, e.hostname) {
+					ch <- prometheus.MustNewConstMetric(
+						brickDuration, prometheus.CounterValue, float64(brick.CumulativeStats.Duration), volume.Name, brick.BrickName,
+					)
+
+					ch <- prometheus.MustNewConstMetric(
+						brickDataRead, prometheus.CounterValue, float64(brick.CumulativeStats.TotalRead), volume.Name, brick.BrickName,
+					)
+
+					ch <- prometheus.MustNewConstMetric(
+						brickDataWritten, prometheus.CounterValue, float64(brick.CumulativeStats.TotalWrite), volume.Name, brick.BrickName,
+					)
+					for _, fop := range brick.CumulativeStats.FopStats.Fop {
 						ch <- prometheus.MustNewConstMetric(
-							brickDuration, prometheus.CounterValue, float64(brick.CumulativeStats.Duration), volume.Name, brick.BrickName,
+							brickFopHits, prometheus.CounterValue, float64(fop.Hits), volume.Name, brick.BrickName, fop.Name,
 						)
 
 						ch <- prometheus.MustNewConstMetric(
-							brickDataRead, prometheus.CounterValue, float64(brick.CumulativeStats.TotalRead), volume.Name, brick.BrickName,
+							brickFopLatencyAvg, prometheus.CounterValue, float64(fop.AvgLatency), volume.Name, brick.BrickName, fop.Name,
 						)
 
 						ch <- prometheus.MustNewConstMetric(
-							brickDataWritten, prometheus.CounterValue, float64(brick.CumulativeStats.TotalWrite), volume.Name, brick.BrickName,
+							brickFopLatencyMin, prometheus.CounterValue, float64(fop.MinLatency), volume.Name, brick.BrickName, fop.Name,
 						)
-						for _, fop := range brick.CumulativeStats.FopStats.Fop {
-							ch <- prometheus.MustNewConstMetric(
-								brickFopHits, prometheus.CounterValue, float64(fop.Hits), volume.Name, brick.BrickName, fop.Name,
-							)
 
-							ch <- prometheus.MustNewConstMetric(
-								brickFopLatencyAvg, prometheus.CounterValue, float64(fop.AvgLatency), volume.Name, brick.BrickName, fop.Name,
-							)
-
-							ch <- prometheus.MustNewConstMetric(
-								brickFopLatencyMin, prometheus.CounterValue, float64(fop.MinLatency), volume.Name, brick.BrickName, fop.Name,
-							)
-
-							ch <- prometheus.MustNewConstMetric(
-								brickFopLatencyMax, prometheus.CounterValue, float64(fop.MaxLatency), volume.Name, brick.BrickName, fop.Name,
-							)
-						}
+						ch <- prometheus.MustNewConstMetric(
+							brickFopLatencyMax, prometheus.CounterValue, float64(fop.MaxLatency), volume.Name, brick.BrickName, fop.Name,
+						)
 					}
 				}
 			}
 		}
 	}
 
+	// NOTE(pc): The following lines are commented out because they are either of no use for now or the command
+	// just takes too long to execute. For those which are both important and takes too long to execute, we have
+	// workarounds to circumvent executing those gluster commands directly.
+	//
 	// executes gluster status all detail
-	volumeStatusAll, err := ExecVolumeStatusAllDetail()
-	if err != nil {
-		log.Errorf("couldn't parse xml of peer status: %v", err)
-	}
-	for _, vol := range volumeStatusAll.VolStatus.Volumes.Volume {
-		for _, node := range vol.Node {
-			if node.Status != 1 {
-			}
-			ch <- prometheus.MustNewConstMetric(
-				nodeSizeTotalBytes, prometheus.CounterValue, float64(node.SizeTotal), node.Hostname, node.Path, vol.VolName,
-			)
+	// volumeStatusAll, err := ExecVolumeStatusAllDetail()
+	// fmt.Printf("ExecVolumeStatusAllDetail took: %v\n", time.Since(begin))
+	// if err != nil {
+	// 	log.Errorf("couldn't parse xml of peer status: %v", err)
+	// }
+	// for _, vol := range volumeStatusAll.VolStatus.Volumes.Volume {
+	// 	for _, node := range vol.Node {
+	// 		if node.Status != 1 {
+	// 		}
+	// 		ch <- prometheus.MustNewConstMetric(
+	// 			nodeSizeTotalBytes, prometheus.CounterValue, float64(node.SizeTotal), node.Hostname, node.Path, vol.VolName,
+	// 		)
 
-			ch <- prometheus.MustNewConstMetric(
-				nodeSizeFreeBytes, prometheus.CounterValue, float64(node.SizeFree), node.Hostname, node.Path, vol.VolName,
-			)
-		}
-	}
-	vols := e.volumes
-	if vols[0] == allVolumes {
-		log.Warn("no Volumes were given.")
-		volumeList, volumeListErr := ExecVolumeList()
-		if volumeListErr != nil {
-			log.Error(volumeListErr)
-		}
-		vols = volumeList.Volume
-	}
+	// 		ch <- prometheus.MustNewConstMetric(
+	// 			nodeSizeFreeBytes, prometheus.CounterValue, float64(node.SizeFree), node.Hostname, node.Path, vol.VolName,
+	// 		)
+	// 	}
+	// }
+	// vols := e.volumes
+	// if vols[0] == allVolumes {
+	// 	log.Warn("no Volumes were given.")
+	// 	begin = time.Now()
+	// 	volumeList, volumeListErr := ExecVolumeList()
+	// 	fmt.Printf("ExecVolumeList took: %v\n", time.Since(begin))
+	// 	if volumeListErr != nil {
+	// 		log.Error(volumeListErr)
+	// 	}
+	// 	vols = volumeList.Volume
+	// }
 
-	for _, vol := range vols {
-		filesCount, volumeHealErr := ExecVolumeHealInfo(vol)
-		if volumeHealErr == nil {
-			ch <- prometheus.MustNewConstMetric(
-				healInfoFilesCount, prometheus.CounterValue, float64(filesCount), vol,
-			)
-		}
-	}
+	// for _, vol := range vols {
+	// 	begin = time.Now()
+	// 	filesCount, volumeHealErr := ExecVolumeHealInfo(vol)
+	// 	fmt.Printf("ExecVolumeHealInfo took: %v\n", time.Since(begin))
+	// 	if volumeHealErr == nil {
+	// 		ch <- prometheus.MustNewConstMetric(
+	// 			healInfoFilesCount, prometheus.CounterValue, float64(filesCount), vol,
+	// 		)
+	// 	}
+	// }
 
-	mountBuffer, execMountCheckErr := execMountCheck()
-	if execMountCheckErr != nil {
-		log.Error(execMountCheckErr)
-	} else {
-		mounts, err := parseMountOutput(mountBuffer.String())
-		if err != nil {
-			log.Error(err)
-			if mounts != nil && len(mounts) > 0 {
-				for _, mount := range mounts {
-					ch <- prometheus.MustNewConstMetric(
-						mountSuccessful, prometheus.GaugeValue, float64(0), mount.volume, mount.mountPoint,
-					)
-				}
-			}
-		} else {
-			for _, mount := range mounts {
-				ch <- prometheus.MustNewConstMetric(
-					mountSuccessful, prometheus.GaugeValue, float64(1), mount.volume, mount.mountPoint,
-				)
+	// mountBuffer, execMountCheckErr := execMountCheck()
+	// if execMountCheckErr != nil {
+	// 	log.Error(execMountCheckErr)
+	// } else {
+	// 	mounts, err := parseMountOutput(mountBuffer.String())
+	// 	if err != nil {
+	// 		log.Error(err)
+	// 		if mounts != nil && len(mounts) > 0 {
+	// 			for _, mount := range mounts {
+	// 				ch <- prometheus.MustNewConstMetric(
+	// 					mountSuccessful, prometheus.GaugeValue, float64(0), mount.volume, mount.mountPoint,
+	// 				)
+	// 			}
+	// 		}
+	// 	} else {
+	// 		for _, mount := range mounts {
+	// 			ch <- prometheus.MustNewConstMetric(
+	// 				mountSuccessful, prometheus.GaugeValue, float64(1), mount.volume, mount.mountPoint,
+	// 			)
 
-				isWriteable, err := execTouchOnVolumes(mount.mountPoint)
-				if err != nil {
-					log.Error(err)
-				}
-				if isWriteable {
-					ch <- prometheus.MustNewConstMetric(
-						volumeWriteable, prometheus.GaugeValue, float64(1), mount.volume, mount.mountPoint,
-					)
-				} else {
-					ch <- prometheus.MustNewConstMetric(
-						volumeWriteable, prometheus.GaugeValue, float64(0), mount.volume, mount.mountPoint,
-					)
-				}
-			}
-		}
-	}
+	// 			begin = time.Now()
+	// 			isWriteable, err := execTouchOnVolumes(mount.mountPoint)
+	// 			fmt.Printf("execTouchOnVolumes took: %v\n", time.Since(begin))
+	// 			if err != nil {
+	// 				log.Error(err)
+	// 			}
+	// 			if isWriteable {
+	// 				ch <- prometheus.MustNewConstMetric(
+	// 					volumeWriteable, prometheus.GaugeValue, float64(1), mount.volume, mount.mountPoint,
+	// 				)
+	// 			} else {
+	// 				ch <- prometheus.MustNewConstMetric(
+	// 					volumeWriteable, prometheus.GaugeValue, float64(0), mount.volume, mount.mountPoint,
+	// 				)
+	// 			}
+	// 		}
+	// 	}
+	// }
 	if e.quota {
 		for _, volume := range volumeInfo.VolInfo.Volumes.Volume {
 			if e.volumes[0] == allVolumes || ContainsVolume(e.volumes, volume.Name) {
@@ -441,6 +463,30 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 	}
+}
+
+// This is sort of hack to get the device path of logical volume under the hood.
+// In a heketi setup, the brick name would be something like:
+//
+//   glu3:/var/lib/heketi/mounts/vg_2e40b260768096c6f20852882581efc9/brick_4d284acdb58001977bead66067368527/brick
+//
+// we need to convert that into the LV device path which would be something like:
+//
+//   /dev/mapper/vg_2e40b260768096c6f20852882581efc9-brick_4d284acdb58001977bead66067368527
+//
+// Note this is kinda hacky and the reason we do this is `gluster volume status all detail --xml` does not
+// work when we have lots of volumes. But the only thing we currently care about for now is brick free/total size.
+// In order to get that, we have this mapping metrics which can be grouped with `node_filesystem_*` metrics if
+// we want to know what is the filesystem usage for each brick/volume.
+func getBrickDevicePath(brickName string) string {
+	parts := strings.Split(brickName, ":")
+	if len(parts) < 2 {
+		log.Infof("Malformed brick name: %#v", brickName)
+		return ""
+	}
+	devPath := strings.TrimPrefix(parts[1], "/var/lib/heketi/mounts/")
+	devPath = strings.TrimSuffix(devPath, "/brick")
+	return "/dev/mapper/" + strings.Replace(devPath, "/", "-", -1)
 }
 
 type mount struct {
